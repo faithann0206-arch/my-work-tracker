@@ -1,0 +1,14 @@
+[build]
+  command = "npm run build"
+  publish = "dist/public"
+ 
+[build.environment]
+  BASE_PATH = "/"
+  PORT = "3000"
+  NODE_VERSION = "18"
+ 
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+ 
