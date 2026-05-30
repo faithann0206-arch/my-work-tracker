@@ -12,6 +12,11 @@ export type LeaveItemStatus =
   | 'Rejected'
   | 'Resolved';
 
+export type LeaveLetterStatus =
+  | 'Letter received'
+  | 'Pending mgt approval'
+  | 'Approved';
+
 export interface WtPendingItem {
   id: string;
   ref: string;
@@ -19,6 +24,7 @@ export interface WtPendingItem {
   description: string;
   dates: string;
   status: string;
+  officialLetterStatus?: LeaveLetterStatus;
   notes: string;
   createdAt: string;
 }
@@ -36,6 +42,9 @@ export interface WtOfficialLetter {
   id: string;
   ref: string;
   relatesTo: string;
+  employeeNo?: string;
+  leaveDays?: string;
+  leaveType?: string;
   dateAdded: string;
   status: LetterStatus;
   notes: string;
@@ -80,6 +89,7 @@ export interface WtAttendanceRow {
   thresholdTime: string;
   expectedOut: string;
   minutesLate: number;
+  earlyLeaveMinutes: number;
   ptUsed: number;
   ptAllowance: number;
   ptRemaining: number;
@@ -104,6 +114,26 @@ export interface WtAbsentDateEntry {
 export interface WtLeaveDateEntry {
   type: string;
   date: string;
+  remarks?: string;
+  actionTaken?: string;
+}
+
+export interface WtEarlyLeaveEntry {
+  date: string;
+  minutes: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  remarks: string;
+  actionTaken: string;
+}
+
+export interface WtAuditIssueEntry {
+  date: string;
+  category: string;
+  reason: string;
+  actionTaken: string;
+  remarks: string;
+  auditMeaning: string;
 }
 
 export interface WtAttendanceSummary {
@@ -111,15 +141,21 @@ export interface WtAttendanceSummary {
   totalLateMinutes: number;
   ptUsed: number;
   ptBalance: number;
+  totalAllowanceUsed: number;
+  allowanceRemaining: number;
   ptExceeded: boolean;
   ptExceedByMinutes: number;
+  earlyLeaveCount: number;
+  totalEarlyLeaveMinutes: number;
   missionCount: number;
   remoteWorkCount: number;
   absentCount: number;
   missingPunchCount: number;
   lateDates: WtLateDateEntry[];
+  earlyLeaveDates: WtEarlyLeaveEntry[];
   absentDates: WtAbsentDateEntry[];
   leaveDates: WtLeaveDateEntry[];
+  auditIssues: WtAuditIssueEntry[];
   status: 'Compliant' | 'Flagged';
 }
 

@@ -2,10 +2,15 @@ import { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import { useWt } from '@/store/wt';
-import type { WtPendingItem } from '@/types/wt';
+import type { LeaveLetterStatus, WtPendingItem } from '@/types/wt';
 
 const ABSENCE_STATUSES = ['No action', 'Converted to leave', 'Report submitted', 'Resolved'];
 const LEAVE_STATUSES = ['Pending approval', 'Approved', 'Rejected', 'Resolved'];
+const LEAVE_LETTER_STATUSES: LeaveLetterStatus[] = [
+  'Letter received',
+  'Pending mgt approval',
+  'Approved',
+];
 
 function borderColor(status: string): string {
   if (status === 'No action' || status === 'Rejected') return 'border-l-red-500';
@@ -55,6 +60,18 @@ function PendingCard({ item, statuses, onUpdate, onDelete }: CardProps) {
           >
             {statuses.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
+          {item.type === 'leave' && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium text-slate-500">Official letter</span>
+              <select
+                value={item.officialLetterStatus || 'Pending mgt approval'}
+                onChange={e => onUpdate(item.id, { officialLetterStatus: e.target.value as LeaveLetterStatus })}
+                className="text-xs border border-blue-200 bg-blue-50 text-blue-800 rounded-lg px-2 py-1 font-medium focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer"
+              >
+                {LEAVE_LETTER_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          )}
         </div>
         <button
           onClick={() => onDelete(item.id)}
@@ -113,6 +130,7 @@ function PendingList({ type }: PendingListProps) {
   const [ref, setRef] = useState('');
   const [description, setDescription] = useState('');
   const [dates, setDates] = useState('');
+  const [officialLetterStatus, setOfficialLetterStatus] = useState<LeaveLetterStatus>('Pending mgt approval');
   const [notes, setNotes] = useState('');
 
   const items = pending
@@ -130,11 +148,13 @@ function PendingList({ type }: PendingListProps) {
       description: description.trim(),
       dates: dates.trim(),
       status: defaultStatus,
+      officialLetterStatus: type === 'leave' ? officialLetterStatus : undefined,
       notes: notes.trim(),
     });
     setRef('');
     setDescription('');
     setDates('');
+    setOfficialLetterStatus('Pending mgt approval');
     setNotes('');
     setShowForm(false);
   }
@@ -211,6 +231,18 @@ function PendingList({ type }: PendingListProps) {
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none bg-white"
             />
           </div>
+          {type === 'leave' && (
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Official letter status</label>
+              <select
+                value={officialLetterStatus}
+                onChange={e => setOfficialLetterStatus(e.target.value as LeaveLetterStatus)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                {LEAVE_LETTER_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          )}
           <div className="flex gap-2">
             <button
               onClick={handleAdd}

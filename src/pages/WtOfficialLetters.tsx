@@ -7,6 +7,15 @@ const LETTER_STATUSES: LetterStatus[] = [
   'Required', 'Requested', 'Yet to be discussed', 'Issued', 'Not required',
 ];
 
+const LEAVE_TYPES = [
+  'Annual Leave',
+  'Sick Leave',
+  'Emergency Leave',
+  'Maternity Leave',
+  'Military Leave',
+  'Other',
+];
+
 function borderColor(status: string): string {
   if (status === 'Required') return 'border-l-red-500';
   if (status === 'Issued') return 'border-l-green-500';
@@ -58,6 +67,11 @@ function LetterCard({ letter, onUpdate, onDelete }: CardProps) {
             <span className="text-xs text-slate-400">{letter.dateAdded}</span>
           </div>
           <div className="text-sm font-semibold text-slate-800 mb-2">{letter.relatesTo}</div>
+          <div className="grid grid-cols-3 gap-2 text-xs text-slate-500 mb-2">
+            <span>Employee: {letter.employeeNo || '-'}</span>
+            <span>Days: {letter.leaveDays || '-'}</span>
+            <span>Type: {letter.leaveType || '-'}</span>
+          </div>
 
           <select
             value={letter.status}
@@ -154,6 +168,9 @@ export default function WtOfficialLetters() {
   const { letters, addLetter, updateLetter, deleteLetter } = useWt();
   const [showForm, setShowForm] = useState(false);
   const [ref, setRef] = useState('');
+  const [employeeNo, setEmployeeNo] = useState('');
+  const [leaveDays, setLeaveDays] = useState('');
+  const [leaveType, setLeaveType] = useState(LEAVE_TYPES[0]);
   const [relatesTo, setRelatesTo] = useState('');
   const [dateAdded, setDateAdded] = useState(new Date().toISOString().slice(0, 10));
   const [status, setStatus] = useState<LetterStatus>('Required');
@@ -166,10 +183,13 @@ export default function WtOfficialLetters() {
   const issCount = letters.filter(l => l.status === 'Issued').length;
 
   function handleAdd() {
-    if (!relatesTo.trim()) return;
+    if (!employeeNo.trim()) return;
     addLetter({
       ref: ref.trim() || nextRef(letters),
-      relatesTo: relatesTo.trim(),
+      relatesTo: relatesTo.trim() || employeeNo.trim() + ' - ' + leaveType + ' (' + leaveDays.trim() + ' day(s))',
+      employeeNo: employeeNo.trim(),
+      leaveDays: leaveDays.trim(),
+      leaveType,
       dateAdded,
       status,
       notes: notes.trim(),
@@ -178,6 +198,9 @@ export default function WtOfficialLetters() {
       notRequiredSource: '',
     });
     setRef('');
+    setEmployeeNo('');
+    setLeaveDays('');
+    setLeaveType(LEAVE_TYPES[0]);
     setRelatesTo('');
     setDateAdded(new Date().toISOString().slice(0, 10));
     setStatus('Required');
@@ -238,8 +261,38 @@ export default function WtOfficialLetters() {
               />
             </div>
           </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Employee no. *</label>
+              <input
+                value={employeeNo}
+                onChange={e => setEmployeeNo(e.target.value)}
+                placeholder="Employee number"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">No. of days</label>
+              <input
+                value={leaveDays}
+                onChange={e => setLeaveDays(e.target.value)}
+                placeholder="e.g. 3"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Leave type</label>
+              <select
+                value={leaveType}
+                onChange={e => setLeaveType(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                {LEAVE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">What it relates to *</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Optional details</label>
             <input
               value={relatesTo}
               onChange={e => setRelatesTo(e.target.value)}
@@ -270,7 +323,7 @@ export default function WtOfficialLetters() {
           <div className="flex gap-2">
             <button
               onClick={handleAdd}
-              disabled={!relatesTo.trim()}
+              disabled={!employeeNo.trim()}
               className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white text-sm px-4 py-1.5 rounded-lg transition-colors"
             >
               Save
