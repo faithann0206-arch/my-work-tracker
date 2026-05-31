@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useSearch } from 'wouter';
-import { BookOpen, Search, Save, Trash2, Loader2, FileText, AlertCircle } from 'lucide-react';
+import { BookOpen, Search, Save, Trash2, Loader2, FileText, AlertCircle, ShieldCheck } from 'lucide-react';
 import { useWt } from '@/store/wt';
 import type { WtPolicyNote } from '@/types/wt';
+import { anthropicMessage, anthropicModels } from '@/lib/secureApi';
 
 const POLICY_MODELS = [
   'claude-opus-4-8',
@@ -16,29 +17,15 @@ const POLICY_MODELS = [
   'claude-3-haiku-20240307',
 ];
 
-async function getAvailableAnthropicModels(apiKey: string): Promise<string[]> {
-  const resp = await fetch('https://api.anthropic.com/v1/models?limit=100', {
-    method: 'GET',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-  });
-
-  if (!resp.ok) return POLICY_MODELS;
-
-  const data = await resp.json() as { data?: Array<{ id?: string }> };
-  const available = (data.data || [])
-    .map(model => model.id)
-    .filter((id): id is string => Boolean(id));
-
+async function getAvailableAnthropicModels(): Promise<string[]> {
+  const available = await anthropicModels();
+  if (available.length === 0) return POLICY_MODELS;
   const preferred = POLICY_MODELS.filter(model => available.includes(model));
   const remainingClaudeModels = available.filter(model => model.startsWith('claude-') && !preferred.includes(model));
   return [...preferred, ...remainingClaudeModels];
 }
 
-async function callAnthropicPolicy(prompt: string, apiKey: string, model: string, withSearch: boolean): Promise<string> {
+async function callAnthropicPolicy(prompt: string, model: string, withSearch: boolean): Promise<string> {
   const payload: Record<string, unknown> = {
     model,
     max_tokens: 1200,
@@ -55,31 +42,7 @@ async function callAnthropicPolicy(prompt: string, apiKey: string, model: string
     ];
   }
 
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!resp.ok) {
-    const errText = await resp.text().catch(() => '');
-    if (resp.status === 401) throw new Error('INVALID_API_KEY');
-    if (resp.status === 429) throw new Error('RATE_LIMITED');
-    if (resp.status === 404 || errText.includes('not_found_error') || errText.includes('model:')) {
-      throw new Error('MODEL_NOT_AVAILABLE');
-    }
-    if (errText.includes('web_search') || errText.includes('tool')) {
-      throw new Error('WEB_SEARCH_NOT_AVAILABLE');
-    }
-    throw new Error('API_ERROR_' + resp.status + (errText ? ': ' + errText.slice(0, 200) : ''));
-  }
-
-  const data = await resp.json() as { content: Array<{ type: string; text?: string }> };
+  const data = await anthropicMessage(payload);
   const textBlocks = data.content
     .filter(b => b.type === 'text' && b.text)
     .map(b => b.text as string);
@@ -87,7 +50,7 @@ async function callAnthropicPolicy(prompt: string, apiKey: string, model: string
   return textBlocks.join('\n').trim() || 'No analysis returned.';
 }
 
-async function analyseUrl(url: string, apiKey: string): Promise<string> {
+async function analyseUrl(url: string): Promise<string> {
   let prompt = 'You are an HR compliance assistant. The user has provided the following URL for analysis:\n\n';
   prompt += url + '\n\n';
   prompt += 'Please fetch and analyse the content of this URL. ';
@@ -99,17 +62,17 @@ async function analyseUrl(url: string, apiKey: string): Promise<string> {
   prompt += 'Format your response with clear sections using headers. Be concise and practical.';
 
   let lastError: unknown = null;
-  const models = await getAvailableAnthropicModels(apiKey);
+  const models = await getAvailableAnthropicModels();
   for (const model of models) {
     try {
-      const text = await callAnthropicPolicy(prompt, apiKey, model, true);
+      const text = await callAnthropicPolicy(prompt, model, true);
       return 'Model used: ' + model + '\n\n' + text;
     } catch (err) {
       lastError = err;
       const message = err instanceof Error ? err.message : String(err);
-      if (message === 'INVALID_API_KEY' || message === 'RATE_LIMITED') throw err;
+      if (message === 'LOGIN_REQUIRED' || message === 'RATE_LIMITED') throw err;
       if (message === 'WEB_SEARCH_NOT_AVAILABLE') {
-        const text = await callAnthropicPolicy(prompt + '\n\nIf you cannot access the URL directly, explain that web search is not available and provide a checklist for manual review.', apiKey, model, false);
+        const text = await callAnthropicPolicy(prompt + '\n\nIf you cannot access the URL directly, explain that web search is not available and provide a checklist for manual review.', model, false);
         return 'Model used: ' + model + '\n\n' + text;
       }
     }
@@ -172,24 +135,18 @@ function NoteCard({ note, onDelete }: { note: WtPolicyNote; onDelete: (id: strin
 }
 
 export default function WtPolicyReader() {
-  const { policyNotes, addPolicyNote, deletePolicyNote, apiKey, setApiKey } = useWt();
+  const { policyNotes, addPolicyNote, deletePolicyNote } = useWt();
   const search = useSearch();
 
   const [url, setUrl] = useState('');
   const [analysing, setAnalysing] = useState(false);
   const [result, setResult] = useState('');
   const [error, setError] = useState('');
-  const [localApiKey, setLocalApiKey] = useState(apiKey);
-  const [showApiKey, setShowApiKey] = useState(false);
 
   // Manual note state
   const [manualTitle, setManualTitle] = useState('');
   const [manualText, setManualText] = useState('');
   const [showManual, setShowManual] = useState(false);
-
-  useEffect(() => {
-    setLocalApiKey(apiKey);
-  }, [apiKey]);
 
   // Read ?url= from query string (from Dashboard quick-check)
   useEffect(() => {
@@ -200,31 +157,20 @@ export default function WtPolicyReader() {
 
   async function handleAnalyse() {
     if (!url.trim()) return;
-    const key = localApiKey.trim();
-    if (!key) {
-      setError('Please enter your Anthropic API key.');
-      return;
-    }
-    if (!key.startsWith('sk-ant-')) {
-      setError('This does not look like an Anthropic API key. It should start with sk-ant-.');
-      return;
-    }
     setAnalysing(true);
     setError('');
     setResult('');
     try {
-      const text = await analyseUrl(url.trim(), key);
-      if (key !== apiKey) setApiKey(key);
+      const text = await analyseUrl(url.trim());
       setResult(text);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (message === 'INVALID_API_KEY') {
-        setError('Anthropic rejected this API key. Paste a valid Anthropic key, then click Analyse again.');
-        if (key === apiKey) setApiKey('');
+      if (message === 'LOGIN_REQUIRED') {
+        setError('Please log out and log in again, then retry the analysis.');
       } else if (message === 'RATE_LIMITED') {
         setError('Anthropic rate limit or credit limit reached. Try again later or use a key with available credits.');
       } else if (message === 'NO_AVAILABLE_MODEL' || message === 'MODEL_NOT_AVAILABLE') {
-        setError('No supported Claude API model is available for this key. Please check the key in the Anthropic Console, billing, and model access.');
+        setError('No supported Claude API model is available. Please check the ANTHROPIC_API_KEY environment variable in Netlify.');
       } else {
         setError(message.replace(/^Error:\s*/, ''));
       }
@@ -273,53 +219,9 @@ export default function WtPolicyReader() {
           AI URL Analyser
         </h2>
 
-        {/* API key */}
-        <div className="mb-4">
-          <label className="block text-xs font-medium text-slate-600 mb-1">Anthropic API Key</label>
-          <div className="flex gap-2">
-            <input
-              type={showApiKey ? 'text' : 'password'}
-              value={localApiKey}
-              onChange={e => setLocalApiKey(e.target.value)}
-              placeholder="sk-ant-..."
-              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-            />
-            <button
-              onClick={() => setShowApiKey(s => !s)}
-              className="bg-white border border-gray-300 hover:bg-gray-50 text-slate-700 text-xs px-3 py-2 rounded-lg transition-colors whitespace-nowrap"
-            >
-              {showApiKey ? 'Hide' : 'Show'}
-            </button>
-            <button
-              onClick={() => {
-                const key = localApiKey.trim();
-                if (!key) {
-                  setApiKey('');
-                  setError('');
-                  return;
-                }
-                if (!key.startsWith('sk-ant-')) {
-                  setError('This does not look like an Anthropic API key. It should start with sk-ant-.');
-                  return;
-                }
-                setApiKey(key);
-                setError('Key saved locally. Click Analyse to test it with Anthropic.');
-              }}
-              className="bg-slate-700 hover:bg-slate-800 text-white text-xs px-3 py-2 rounded-lg transition-colors whitespace-nowrap"
-            >
-              Save key
-            </button>
-            <button
-              onClick={() => {
-                setLocalApiKey('');
-                setApiKey('');
-                setError('');
-              }}
-              className="bg-white border border-red-200 hover:bg-red-50 text-red-600 text-xs px-3 py-2 rounded-lg transition-colors whitespace-nowrap"
-            >
-              Clear
-            </button>
-          </div>
+        <div className="mb-4 flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+          <ShieldCheck size={14} />
+          Claude is called through a secure Netlify Function. The API key is not stored in this browser.
         </div>
 
         {/* URL input */}

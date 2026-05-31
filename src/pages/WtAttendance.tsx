@@ -1,8 +1,9 @@
 ﻿import { useState, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, FileSpreadsheet, Trash2, Download, AlertTriangle, CheckCircle, Loader2, Eye, EyeOff, Key } from 'lucide-react';
+import { Upload, FileSpreadsheet, Trash2, Download, AlertTriangle, CheckCircle, Loader2, ShieldCheck } from 'lucide-react';
 import { useWt } from '@/store/wt';
 import type { WtAttendanceEmployee, WtAttendanceRow, WtAttendanceSummary } from '@/types/wt';
+import { anthropicMessage, anthropicModels } from '@/lib/secureApi';
 
 // â”€â”€â”€ Arabic Detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -702,55 +703,20 @@ const ATTENDANCE_MODELS = [
   'claude-3-haiku-20240307',
 ];
 
-async function getAvailableAnthropicModels(apiKey: string): Promise<string[]> {
-  const resp = await fetch('https://api.anthropic.com/v1/models?limit=100', {
-    method: 'GET',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-  });
-
-  if (!resp.ok) return ATTENDANCE_MODELS;
-
-  const data = await resp.json() as { data?: Array<{ id?: string }> };
-  const available = (data.data || [])
-    .map(model => model.id)
-    .filter((id): id is string => Boolean(id));
-
+async function getAvailableAnthropicModels(): Promise<string[]> {
+  const available = await anthropicModels();
+  if (available.length === 0) return ATTENDANCE_MODELS;
   const preferred = ATTENDANCE_MODELS.filter(model => available.includes(model));
   const remainingClaudeModels = available.filter(model => model.startsWith('claude-') && !preferred.includes(model));
   return [...preferred, ...remainingClaudeModels];
 }
 
-async function callAnthropicAttendance(prompt: string, apiKey: string, model: string): Promise<string> {
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 800,
-      messages: [{ role: 'user', content: prompt }],
-    }),
+async function callAnthropicAttendance(prompt: string, model: string): Promise<string> {
+  const data = await anthropicMessage({
+    model,
+    max_tokens: 800,
+    messages: [{ role: 'user', content: prompt }],
   });
-
-  if (!resp.ok) {
-    const errText = await resp.text().catch(() => '');
-    if (resp.status === 401) throw new Error('INVALID_API_KEY');
-    if (resp.status === 429) throw new Error('RATE_LIMITED');
-    if (resp.status === 404 || errText.includes('not_found_error') || errText.includes('model:')) {
-      throw new Error('MODEL_NOT_AVAILABLE');
-    }
-    throw new Error('API_ERROR_' + resp.status + (errText ? ': ' + errText.slice(0, 200) : ''));
-  }
-
-  const data = await resp.json() as { content: Array<{ type?: string; text?: string }> };
   return data.content
     .filter(b => !b.type || b.type === 'text')
     .map(b => b.text || '')
@@ -759,8 +725,7 @@ async function callAnthropicAttendance(prompt: string, apiKey: string, model: st
 }
 
 async function generateAiReport(
-  emp: WtAttendanceEmployee,
-  apiKey: string
+  emp: WtAttendanceEmployee
 ): Promise<{ bullets: string[]; summary: string }> {
   const s = emp.summary;
 
@@ -850,15 +815,15 @@ async function generateAiReport(
 
   let text = '';
   let lastError: unknown = null;
-  const models = await getAvailableAnthropicModels(apiKey);
+  const models = await getAvailableAnthropicModels();
   for (const model of models) {
     try {
-      text = await callAnthropicAttendance(prompt, apiKey, model);
+      text = await callAnthropicAttendance(prompt, model);
       break;
     } catch (err) {
       lastError = err;
       const message = err instanceof Error ? err.message : String(err);
-      if (message === 'INVALID_API_KEY' || message === 'RATE_LIMITED') throw err;
+      if (message === 'LOGIN_REQUIRED' || message === 'RATE_LIMITED') throw err;
       if (message !== 'MODEL_NOT_AVAILABLE') throw err;
     }
   }
@@ -1293,15 +1258,13 @@ function SummaryRow({ emp }: { emp: WtAttendanceEmployee }) {
 // â”€â”€â”€ Main Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export default function WtAttendance() {
-  const { attEmployees, setAttEmployees, updateAttEmployee, clearAttendance, apiKey, setApiKey } = useWt();
+  const { attEmployees, setAttEmployees, updateAttEmployee, clearAttendance } = useWt();
   const fileRef = useRef<HTMLInputElement>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiStatus, setAiStatus] = useState('');
   const [reportMonth, setReportMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [localApiKey, setLocalApiKey] = useState(apiKey);
 
   const employees = Object.values(attEmployees);
   const hasData = employees.length > 0;
@@ -1348,13 +1311,6 @@ export default function WtAttendance() {
 
 
   async function handleGenerateAndDownload() {
-    const key = localApiKey.trim();
-    if (!key) {
-      alert('Please enter your Anthropic API key first.');
-      return;
-    }
-    if (key !== apiKey) setApiKey(key);
-
     setAiLoading(true);
     const enriched: WtAttendanceEmployee[] = [];
     const aiFailures: string[] = [];
@@ -1363,7 +1319,7 @@ export default function WtAttendance() {
       const emp = employees[i];
       setAiStatus('Generating report ' + (i + 1) + ' of ' + employees.length + ': ' + (emp.employeeName || emp.sheetName) + '...');
       try {
-        const result = await generateAiReport(emp, key);
+        const result = await generateAiReport(emp);
         const updated = { ...emp, report: { ...result, generatedAt: new Date().toISOString() } };
         enriched.push(updated);
         updateAttEmployee(emp.sheetName, { report: updated.report });
@@ -1430,37 +1386,13 @@ export default function WtAttendance() {
         <p className="text-slate-500 text-sm mt-0.5">Upload Excel attendance files and generate monthly reports</p>
       </div>
 
-      {/* API Key */}
+      {/* Secure AI */}
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6">
         <div className="flex items-center gap-2 mb-2">
-          <Key size={14} className="text-slate-500" />
-          <span className="text-sm font-medium text-slate-700">Anthropic API Key</span>
-          <span className="text-xs text-slate-400">(required for AI report generation)</span>
+          <ShieldCheck size={14} className="text-emerald-600" />
+          <span className="text-sm font-medium text-slate-700">Secure AI report generation</span>
         </div>
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <input
-              type={showApiKey ? 'text' : 'password'}
-              value={localApiKey}
-              onChange={e => setLocalApiKey(e.target.value)}
-              placeholder="sk-ant-..."
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-            />
-            <button
-              type="button"
-              onClick={() => setShowApiKey(s => !s)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-            >
-              {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
-            </button>
-          </div>
-          <button
-            onClick={() => setApiKey(localApiKey.trim())}
-            className="bg-slate-700 hover:bg-slate-800 text-white text-sm px-4 py-2 rounded-lg transition-colors"
-          >
-            Save key
-          </button>
-        </div>
+        <p className="text-xs text-slate-500">Claude is called through a Netlify Function. The API key is stored in Netlify environment variables, not in this browser.</p>
       </div>
 
       {/* Upload section */}

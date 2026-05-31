@@ -3,7 +3,7 @@ import type React from 'react';
 import { Link, useRoute } from 'wouter';
 import {
   LayoutDashboard, ClipboardList, FileText, Mail,
-  CalendarDays, BookOpen, Menu, ChevronRight, Briefcase,
+  CalendarDays, BookOpen, Menu, ChevronRight, Briefcase, LogOut,
 } from 'lucide-react';
 
 type NavItem = { path: string; label: string; icon: React.ElementType };
@@ -31,7 +31,7 @@ function NavLink({ path, label, icon: Icon, collapsed }: NavItem & { collapsed: 
   );
 }
 
-export default function WtLayout({ children }: { children: React.ReactNode }) {
+export default function WtLayout({ children, onLogout }: { children: React.ReactNode; onLogout?: () => void }) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -55,12 +55,24 @@ export default function WtLayout({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
 
-        <button
-          onClick={() => setCollapsed(c => !c)}
-          className="flex items-center justify-center p-3 border-t border-slate-700 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
-        >
-          {collapsed ? <ChevronRight size={16} /> : <Menu size={16} />}
-        </button>
+        <div className="border-t border-slate-700">
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              className="w-full flex items-center justify-center gap-2 p-3 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+              title="Log out"
+            >
+              <LogOut size={16} />
+              {!collapsed && <span className="text-xs font-medium">Log out</span>}
+            </button>
+          )}
+          <button
+            onClick={() => setCollapsed(c => !c)}
+            className="w-full flex items-center justify-center p-3 border-t border-slate-700 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+          >
+            {collapsed ? <ChevronRight size={16} /> : <Menu size={16} />}
+          </button>
+        </div>
       </aside>
 
       <main className="flex-1 overflow-y-auto">{children}</main>

@@ -12,12 +12,13 @@ import WtOfficialLetters from '@/pages/WtOfficialLetters';
 import WtEmailLog from '@/pages/WtEmailLog';
 import WtAttendance from '@/pages/WtAttendance';
 import WtPolicyReader from '@/pages/WtPolicyReader';
+import { AUTH_TOKEN_KEY } from '@/lib/secureApi';
 
 const queryClient = new QueryClient();
 
-function Router() {
+function Router({ onLogout }: { onLogout: () => void }) {
   return (
-    <WtLayout>
+    <WtLayout onLogout={onLogout}>
       <Switch>
         <Route path="/" component={WtDashboard} />
         <Route path="/pending" component={WtPendingItems} />
@@ -32,11 +33,21 @@ function Router() {
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(
-    () => localStorage.getItem('hr_auth') === 'true'
+    () => Boolean(localStorage.getItem(AUTH_TOKEN_KEY))
   );
 
   if (!isLoggedIn) {
-    return <Login onLogin={() => setIsLoggedIn(true)} />;
+    return <Login onLogin={(token) => {
+      localStorage.setItem(AUTH_TOKEN_KEY, token);
+      localStorage.removeItem('hr_auth');
+      setIsLoggedIn(true);
+    }} />;
+  }
+
+  function handleLogout() {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    localStorage.removeItem('hr_auth');
+    setIsLoggedIn(false);
   }
 
   return (
@@ -44,7 +55,7 @@ function App() {
       <TooltipProvider>
         <WtProvider>
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-            <Router />
+            <Router onLogout={handleLogout} />
           </WouterRouter>
         </WtProvider>
         <Toaster />
