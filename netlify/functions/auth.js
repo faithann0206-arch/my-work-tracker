@@ -5,8 +5,8 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: 'Method not allowed' };
   }
 
-  const configuredUser = process.env.WT_USERNAME || '';
-  const configuredPassword = process.env.WT_PASSWORD || '';
+  const configuredUser = (process.env.WT_USERNAME || '').trim();
+  const configuredPassword = (process.env.WT_PASSWORD || '').trim();
   const configuredSecret = process.env.WT_SESSION_SECRET || '';
   if (!configuredUser || !configuredPassword || !configuredSecret) {
     return {
@@ -22,7 +22,10 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ error: 'Invalid request.' }) };
   }
 
-  if (body.username !== configuredUser || body.password !== configuredPassword) {
+  const suppliedUser = String(body.username || '').trim();
+  const suppliedPassword = String(body.password || '').trim();
+
+  if (suppliedUser !== configuredUser || suppliedPassword !== configuredPassword) {
     return { statusCode: 401, body: JSON.stringify({ error: 'Incorrect username or password.' }) };
   }
 
