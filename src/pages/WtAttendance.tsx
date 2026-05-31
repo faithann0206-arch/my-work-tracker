@@ -969,6 +969,10 @@ function leaveTextForTable(s: WtAttendanceSummary): string {
   return leaveTextForSummary(s) || '-';
 }
 
+function isFullRemoteEmployee(emp: WtAttendanceEmployee, monthlyWorkingDays: number): boolean {
+  return emp.summary.remoteWorkCount >= Math.max(monthlyWorkingDays - emp.summary.leaveDates.length, 1);
+}
+
 function employeeNotes(emp: WtAttendanceEmployee): string[] {
   const s = emp.summary;
   const notes: string[] = [];
@@ -1074,10 +1078,8 @@ function buildWordDoc(
   const compliantEmployees = employees.filter(e => !hasManagementReview(e.summary));
   const totalLateDays = employees.reduce((sum, e) => sum + e.summary.lateInstances, 0);
   const monthlyWorkingDays = workingDaysInMonth(reportMonth);
-  const totalActualWorkingDays = employees.reduce((sum, e) => sum + actualWorkingDays(e, monthlyWorkingDays), 0);
-  const totalWorkingDaysForLate = lateEmployees.reduce((sum, e) => sum + actualWorkingDays(e, monthlyWorkingDays), 0);
-  const combinedLateRate = totalWorkingDaysForLate > 0 ? pct((totalLateDays / totalWorkingDaysForLate) * 100) : '0%';
-  const totalEmployeeLateRate = totalActualWorkingDays > 0 ? pct((totalLateDays / totalActualWorkingDays) * 100) : '0%';
+  const inPersonEmployees = employees.filter(e => !isFullRemoteEmployee(e, monthlyWorkingDays));
+  const totalEmployeeLateRate = inPersonEmployees.length > 0 ? pct((lateEmployees.length / inPersonEmployees.length) * 100) : '0%';
 
   function tr(cells: string[], header = false): string {
     const tag = header ? 'th' : 'td';
@@ -1104,7 +1106,7 @@ function buildWordDoc(
   html += tr(['Metric', 'Value', 'Context'], true);
   html += tr(['Fully Compliant Employees', String(compliantEmployees.length), pct((compliantEmployees.length / Math.max(totalEmployees, 1)) * 100) + ' of reported employees']);
   html += tr(['Late Arrival Rate', pct((lateEmployees.length / Math.max(totalEmployees, 1)) * 100), lateEmployees.length + ' of ' + totalEmployees + ' employees']);
-  html += tr(['Overall Employee Late %', totalEmployeeLateRate, totalLateDays + ' late days ÷ ' + totalActualWorkingDays + ' actual working days after leave deductions']);
+  html += tr(['Overall Employee Late %', totalEmployeeLateRate, lateEmployees.length + ' employees with late log-ins ÷ ' + inPersonEmployees.length + ' in-person employees']);
   html += tr(['Employees with Official Missions', String(employees.filter(e => e.summary.missionCount > 0).length), totalMissions + ' total missions conducted']);
   html += tr(['Employees Who Used Personal Time', String(totalEarlyUsers), 'Permitted early departures within 4-hour monthly allowance unless noted']);
   html += tr(['Exceeded Personal Time', String(exceededEmployees.length), 'Excluding late log-ins unless management applies deduction']);
@@ -1122,23 +1124,21 @@ function buildWordDoc(
 
   html += '<h2>Employees With Late Log-ins</h2>';
   html += '<table class="tight">';
-  html += tr(['Employee', 'Leave Days', 'Official Missions', 'Late Days', 'Late %', 'Early Leave Used', 'PT Balance (excl. late)', 'PT Balance (incl. late)', 'Remarks'], true);
+  html += tr(['Employee', 'Leave Days', 'Official Missions', 'Late Days', 'Early Leave Used', 'PT Balance (excl. late)', 'PT Balance (incl. late)', 'Remarks'], true);
   for (const emp of lateEmployees) {
     const s = emp.summary;
-    const workingDays = actualWorkingDays(emp, monthlyWorkingDays);
     html += tr([
       escapeHtml(employeeDisplay(emp)),
       escapeHtml(leaveTextForTable(s)),
       s.missionCount ? String(s.missionCount) : '-',
       String(s.lateInstances),
-      workingDays ? pct((s.lateInstances / workingDays) * 100) : '0%',
       s.earlyLeaveCount ? fmtMins(s.totalEarlyLeaveMinutes) : '-',
       signedBalance(s.allowanceRemaining),
       signedBalance(240 - s.totalEarlyLeaveMinutes - s.totalLateMinutes),
       statusCell(emp),
     ]);
   }
-  if (lateEmployees.length === 0) html += tr(['No late log-ins recorded', '-', '-', '-', '-', '-', '-', '-', '<span class="green">Compliant</span>']);
+  if (lateEmployees.length === 0) html += tr(['No late log-ins recorded', '-', '-', '-', '-', '-', '-', '<span class="green">Compliant</span>']);
   html += '</table>';
 
   html += '<h2>All Other Employees</h2>';
@@ -1160,7 +1160,7 @@ function buildWordDoc(
 
   html += '<h2>Late Log-in Frequency Breakdown</h2>';
   html += '<table class="tight">';
-  html += tr(['Employee', 'Late Days', 'Actual Working Days', 'Frequency', 'Total Late Time', 'Individual Rate', 'Pattern'], true);
+  html += tr(['Employee', 'Late Days', 'Actual Working Days', 'Frequency', 'Total Late Time', 'Pattern'], true);
   for (const emp of lateEmployees.sort((a, b) => b.summary.lateInstances - a.summary.lateInstances)) {
     const s = emp.summary;
     const workingDays = actualWorkingDays(emp, monthlyWorkingDays);
@@ -1171,11 +1171,10 @@ function buildWordDoc(
       String(workingDays),
       s.lateInstances + ' out of ' + workingDays + ' days',
       fmtMins(s.totalLateMinutes),
-      pct(rate),
       rate >= 25 ? 'Consistent' : 'Occasional',
     ]);
   }
-  html += tr(['Total', String(totalLateDays), String(totalWorkingDaysForLate), totalLateDays + ' out of ' + totalWorkingDaysForLate + ' days', fmtMins(employees.reduce((sum, e) => sum + e.summary.totalLateMinutes, 0)), combinedLateRate, 'Combined frequency rate']);
+  html += tr(['Total', String(totalLateDays), '-', '-', fmtMins(employees.reduce((sum, e) => sum + e.summary.totalLateMinutes, 0)), 'Combined late time']);
   html += '</table>';
   html += '<p class="small">Late % = Late Days ÷ Actual Working Days. Actual Working Days = monthly Monday-Friday working days, including Fridays, minus that employee&apos;s leave days.</p>';
 
