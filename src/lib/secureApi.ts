@@ -1,11 +1,23 @@
 export const AUTH_TOKEN_KEY = 'hr_auth_token';
 
+const API_BASES = ['/api', '/.netlify/functions'];
+
 function getToken(): string {
   return localStorage.getItem(AUTH_TOKEN_KEY) || '';
 }
 
+async function apiFetch(path: string, init: RequestInit): Promise<Response> {
+  let lastResponse: Response | null = null;
+  for (const base of API_BASES) {
+    const resp = await fetch(base + path, init);
+    if (resp.status !== 404) return resp;
+    lastResponse = resp;
+  }
+  return lastResponse || fetch(API_BASES[0] + path, init);
+}
+
 export async function login(username: string, password: string): Promise<string> {
-  const resp = await fetch('/.netlify/functions/auth', {
+  const resp = await apiFetch('/auth', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
@@ -20,7 +32,7 @@ export async function login(username: string, password: string): Promise<string>
 }
 
 async function secureAnthropic(endpoint: 'models' | 'messages', payload?: unknown): Promise<Response> {
-  return fetch('/.netlify/functions/anthropic', {
+  return apiFetch('/anthropic', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

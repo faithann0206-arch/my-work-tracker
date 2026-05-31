@@ -78,6 +78,35 @@ export interface WtEmail {
   createdAt: string;
 }
 
+// Monthly Work Reports
+
+export type MonthlyWorkCategory =
+  | 'Attendance'
+  | 'Leave'
+  | 'Official letters'
+  | 'Email follow-up'
+  | 'Policy / compliance'
+  | 'Reporting'
+  | 'Other';
+
+export type MonthlyWorkStatus =
+  | 'Completed'
+  | 'In progress'
+  | 'Pending management'
+  | 'Carried forward';
+
+export interface WtMonthlyWorkItem {
+  id: string;
+  month: string;
+  date: string;
+  category: MonthlyWorkCategory;
+  title: string;
+  details: string;
+  outcome: string;
+  status: MonthlyWorkStatus;
+  createdAt: string;
+}
+
 // ─── Attendance ───────────────────────────────────────────────────────────────
 
 export interface WtAttendanceRow {

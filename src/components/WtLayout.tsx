@@ -3,7 +3,7 @@ import type React from 'react';
 import { Link, useRoute } from 'wouter';
 import {
   LayoutDashboard, ClipboardList, FileText, Mail,
-  CalendarDays, BookOpen, Menu, ChevronRight, Briefcase, LogOut,
+  CalendarDays, BookOpen, Menu, ChevronRight, Briefcase, LogOut, NotebookText,
 } from 'lucide-react';
 
 type NavItem = { path: string; label: string; icon: React.ElementType };
@@ -13,6 +13,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/pending',    label: 'Pending Items',   icon: ClipboardList },
   { path: '/letters',    label: 'Official Letters', icon: FileText },
   { path: '/emails',     label: 'Email Log',       icon: Mail },
+  { path: '/monthly-report', label: 'Monthly Report', icon: NotebookText },
   { path: '/attendance', label: 'Attendance',      icon: CalendarDays },
   { path: '/policy',     label: 'Policy Reader',   icon: BookOpen },
 ];

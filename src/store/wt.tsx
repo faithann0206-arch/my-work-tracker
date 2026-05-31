@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import type {
   WtPendingItem, WtOfficialLetter, WtEmail,
-  WtAttendanceEmployee, WtPolicyNote,
+  WtAttendanceEmployee, WtPolicyNote, WtMonthlyWorkItem,
 } from '../types/wt';
 
 function wtLoad<T>(key: string, def: T): T {
@@ -23,6 +23,7 @@ interface WtState {
   pending: WtPendingItem[];
   letters: WtOfficialLetter[];
   emails: WtEmail[];
+  monthlyWork: WtMonthlyWorkItem[];
   attEmployees: Record<string, WtAttendanceEmployee>;
   policyNotes: WtPolicyNote[];
   apiKey: string;
@@ -37,6 +38,9 @@ interface WtContextValue extends WtState {
   deleteLetter: (id: string) => void;
   addEmail: (e: Omit<WtEmail, 'id' | 'createdAt'>) => void;
   deleteEmail: (id: string) => void;
+  addMonthlyWork: (item: Omit<WtMonthlyWorkItem, 'id' | 'createdAt'>) => void;
+  updateMonthlyWork: (id: string, patch: Partial<WtMonthlyWorkItem>) => void;
+  deleteMonthlyWork: (id: string) => void;
   setAttEmployees: (emps: Record<string, WtAttendanceEmployee>) => void;
   updateAttEmployee: (sheetName: string, patch: Partial<WtAttendanceEmployee>) => void;
   clearAttendance: () => void;
@@ -52,6 +56,7 @@ export function WtProvider({ children }: { children: React.ReactNode }) {
     pending: wtLoad<WtPendingItem[]>('pending', []),
     letters: wtLoad<WtOfficialLetter[]>('letters', []),
     emails: wtLoad<WtEmail[]>('emails', []),
+    monthlyWork: wtLoad<WtMonthlyWorkItem[]>('monthlyWork', []),
     attEmployees: wtLoad<Record<string, WtAttendanceEmployee>>('attEmployees', {}),
     policyNotes: wtLoad<WtPolicyNote[]>('policyNotes', []),
     apiKey: wtLoad<string>('apiKey', ''),
@@ -121,6 +126,30 @@ export function WtProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const addMonthlyWork = useCallback((item: Omit<WtMonthlyWorkItem, 'id' | 'createdAt'>) => {
+    setState(prev => {
+      const next = [...prev.monthlyWork, { ...item, id: genId(), createdAt: new Date().toISOString() }];
+      wtSave('monthlyWork', next);
+      return { ...prev, monthlyWork: next };
+    });
+  }, []);
+
+  const updateMonthlyWork = useCallback((id: string, patch: Partial<WtMonthlyWorkItem>) => {
+    setState(prev => {
+      const next = prev.monthlyWork.map(item => item.id === id ? { ...item, ...patch } : item);
+      wtSave('monthlyWork', next);
+      return { ...prev, monthlyWork: next };
+    });
+  }, []);
+
+  const deleteMonthlyWork = useCallback((id: string) => {
+    setState(prev => {
+      const next = prev.monthlyWork.filter(item => item.id !== id);
+      wtSave('monthlyWork', next);
+      return { ...prev, monthlyWork: next };
+    });
+  }, []);
+
   const setAttEmployees = useCallback((emps: Record<string, WtAttendanceEmployee>) => {
     wtSave('attEmployees', emps);
     setState(prev => ({ ...prev, attEmployees: emps }));
@@ -169,6 +198,7 @@ export function WtProvider({ children }: { children: React.ReactNode }) {
       addPending, updatePending, deletePending,
       addLetter, updateLetter, deleteLetter,
       addEmail, deleteEmail,
+      addMonthlyWork, updateMonthlyWork, deleteMonthlyWork,
       setAttEmployees, updateAttEmployee, clearAttendance,
       addPolicyNote, deletePolicyNote,
       setApiKey,

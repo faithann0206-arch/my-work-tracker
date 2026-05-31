@@ -10,6 +10,7 @@ import WtDashboard from '@/pages/WtDashboard';
 import WtPendingItems from '@/pages/WtPendingItems';
 import WtOfficialLetters from '@/pages/WtOfficialLetters';
 import WtEmailLog from '@/pages/WtEmailLog';
+import WtMonthlyReport from '@/pages/WtMonthlyReport';
 import WtAttendance from '@/pages/WtAttendance';
 import WtPolicyReader from '@/pages/WtPolicyReader';
 import { AUTH_TOKEN_KEY } from '@/lib/secureApi';
@@ -24,6 +25,7 @@ function Router({ onLogout }: { onLogout: () => void }) {
         <Route path="/pending" component={WtPendingItems} />
         <Route path="/letters" component={WtOfficialLetters} />
         <Route path="/emails" component={WtEmailLog} />
+        <Route path="/monthly-report" component={WtMonthlyReport} />
         <Route path="/attendance" component={WtAttendance} />
         <Route path="/policy" component={WtPolicyReader} />
       </Switch>
