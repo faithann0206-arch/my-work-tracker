@@ -893,6 +893,143 @@ function formatDateList(dates: Array<{ date: string }>): string {
   return dates.length ? dates.map(d => escapeHtml(d.date)).join(', ') : 'N/A';
 }
 
+function displayDate(value: string): string {
+  const parsed = parseAttendanceDate(value);
+  if (!parsed) return value;
+  return parsed.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }).replace('/', '.');
+}
+
+function isBeforePolicyChange(row: WtAttendanceRow): boolean {
+  const parsed = parseAttendanceDate(row.date);
+  return Boolean(parsed && parsed < new Date(2026, 4, 12));
+}
+
+function uniqueList(values: string[]): string[] {
+  return Array.from(new Set(values.map(v => v.trim()).filter(Boolean)));
+}
+
+function rowManagementText(row: WtAttendanceRow): string {
+  const text = [row.actionTaken, row.remarks].filter(Boolean).join(' - ').trim();
+  if (!text) return '';
+  return text.replace(/\s+/g, ' ');
+}
+
+function formatLateProfile(emp: WtAttendanceEmployee): string {
+  const s = emp.summary;
+  if (s.lateDates.length === 0) return 'N/A';
+  return s.lateDates.map(entry => {
+    const row = emp.rows.find(r => r.date === entry.date);
+    const time = row?.timeIn && row.timeIn !== 'N/A' ? ' (' + escapeHtml(row.timeIn) + ', ' + fmtMins(entry.minutes) + ')' : ' (' + fmtMins(entry.minutes) + ')';
+    const action = row ? rowManagementText(row) : [entry.actionTaken, entry.remarks].filter(Boolean).join(' - ');
+    return escapeHtml(displayDate(entry.date)) + time + (action ? ' - ' + escapeHtml(action) : '');
+  }).join('<br/>');
+}
+
+function formatEarlyProfile(s: WtAttendanceSummary): string {
+  if (s.earlyLeaveDates.length === 0) return 'No early departures';
+  const entries = s.earlyLeaveDates
+    .map(entry => displayDate(entry.date) + ' - ' + fmtMins(entry.minutes))
+    .join(', ');
+  return plural(s.earlyLeaveCount, 'time', 'times') + ' (' + fmtMins(s.totalEarlyLeaveMinutes) + ': ' + escapeHtml(entries) + ')';
+}
+
+function formatLeaveProfile(s: WtAttendanceSummary): string {
+  if (s.leaveDates.length === 0) return 'N/A';
+  const grouped = s.leaveDates.reduce<Record<string, string[]>>((acc, leave) => {
+    acc[leave.type] = acc[leave.type] || [];
+    acc[leave.type].push(displayDate(leave.date));
+    return acc;
+  }, {});
+  return Object.entries(grouped)
+    .map(([type, dates]) => escapeHtml(type) + ' (' + plural(dates.length, 'day', 'days') + ': ' + escapeHtml(dates.join(', ')) + ')')
+    .join('<br/>');
+}
+
+function formatDocumentation(emp: WtAttendanceEmployee): string {
+  const notes: string[] = [];
+  const lateActions = uniqueList(emp.summary.lateDates.flatMap(entry => {
+    const row = emp.rows.find(r => r.date === entry.date);
+    return [row?.actionTaken || entry.actionTaken, row?.remarks || entry.remarks];
+  }));
+  const missingActions = uniqueList(emp.summary.auditIssues
+    .filter(issue => issue.category === 'Missing punch' || issue.category === 'Management action')
+    .flatMap(issue => [issue.actionTaken, issue.remarks]));
+
+  if (lateActions.length > 0) {
+    notes.push(lateActions.join('; '));
+  }
+  if (missingActions.length > 0) {
+    notes.push(missingActions.join('; '));
+  }
+  return notes.length ? escapeHtml(notes.join(' ')) : 'N/A';
+}
+
+function formatProfileWorkExceptions(emp: WtAttendanceEmployee): string {
+  const s = emp.summary;
+  const items: string[] = [];
+  if (s.missionCount > 0) {
+    const dates = emp.rows
+      .filter(row => detectReason([row.arabicReason, row.remarks, row.actionTaken].join(' ')) === 'Official Mission')
+      .map(row => displayDate(row.date));
+    items.push('Official Missions (' + s.missionCount + (dates.length ? ': ' + escapeHtml(dates.join(', ')) : '') + ')');
+  }
+  if (s.remoteWorkCount > 0) {
+    const dates = emp.rows
+      .filter(row => detectReason([row.arabicReason, row.remarks, row.actionTaken].join(' ')) === 'Remote Work')
+      .map(row => displayDate(row.date));
+    items.push('Remote work (' + plural(s.remoteWorkCount, 'day', 'day records') + (dates.length ? ': ' + escapeHtml(dates.join(', ')) : '') + ')');
+  }
+  if (s.missingPunchCount > 0) {
+    const missing = s.auditIssues
+      .filter(issue => issue.category === 'Missing punch')
+      .map(issue => 'Missing log record - ' + displayDate(issue.date) + ': ' + (issue.reason || issue.remarks || 'unregistered log in/out'));
+    items.push(...missing.map(escapeHtml));
+  }
+  const eveningRows = emp.rows.filter(row => {
+    const out = parseClockMinutes(row.timeOut);
+    return out !== null && out >= 17 * 60;
+  });
+  if (eveningRows.length > 0) {
+    items.push('Evening work noted - ' + eveningRows.map(row => displayDate(row.date) + ': worked until ' + row.timeOut).join('; '));
+  }
+  if (s.absentCount > 0) {
+    items.push('Absence entries (' + s.absentCount + ')');
+  }
+  return items.length ? items.join('<br/>') : 'N/A';
+}
+
+function formatPersonalTimeProfile(emp: WtAttendanceEmployee): string {
+  const s = emp.summary;
+  const prePolicyLate = emp.rows
+    .filter(row => row.minutesLate > 0 && isBeforePolicyChange(row))
+    .reduce((sum, row) => sum + row.minutesLate, 0);
+  const early = s.totalEarlyLeaveMinutes;
+
+  if (prePolicyLate > 0) {
+    const oldPolicyUsed = prePolicyLate + early;
+    return 'Old policy to 11.05.2026: ' + fmtMins(oldPolicyUsed) + ' used (' + fmtMins(prePolicyLate) + ' late log-ins'
+      + (early ? ' + ' + fmtMins(early) + ' early departure' : '')
+      + '); ' + signedBalance(240 - oldPolicyUsed) + ' remaining. From 12.05.2026 late log-ins were not deducted from the 4-hour personal balance.';
+  }
+
+  if (s.earlyLeaveCount === 0) return 'N/A';
+  if (s.ptExceeded) return 'Exceeded by ' + fmtMins(s.ptExceedByMinutes) + ' (' + fmtMins(early) + ' used)';
+  if (s.allowanceRemaining === 0) return 'Fully consumed with permission from management';
+  return 'Within Limit (' + fmtMins(early) + ' used; ' + fmtMins(s.allowanceRemaining) + ' remaining)';
+}
+
+function profileStatus(emp: WtAttendanceEmployee): string {
+  return hasManagementReview(emp.summary)
+    ? 'Management review pending'
+    : 'Compliant';
+}
+
+function profileStatusCell(emp: WtAttendanceEmployee): string {
+  return hasManagementReview(emp.summary)
+    ? '<span class="amber">Management review pending</span>'
+    : '<span class="green">Compliant</span>';
+}
+
 function formatWorkExceptions(s: WtAttendanceSummary): string {
   const items: string[] = [];
   const leaveSummary = formatLeaveSummary(s);
@@ -1056,6 +1193,8 @@ function buildWordDoc(
   html += 'td,th{border:1px solid #cbd5e0;padding:4pt 8pt;font-size:10pt;}';
   html += 'th{background:#e8f0f8;font-weight:bold;text-align:left;}';
   html += '.tight td,.tight th{font-size:9.5pt;padding:3pt 6pt;}';
+  html += '.profile{page-break-inside:avoid;margin-bottom:16pt;}';
+  html += '.profile td:first-child,.label{width:32%;font-weight:bold;background:#f8fafc;color:#334155;}';
   html += '.note{background:#fef3c7;border:1px solid #f59e0b;padding:8pt;margin:10pt 0;font-size:10pt;}';
   html += '.green{color:#166534;font-weight:bold;}';
   html += '.red{color:#991b1b;font-weight:bold;}';
@@ -1092,25 +1231,63 @@ function buildWordDoc(
       : '<span class="green">Compliant</span>';
   }
 
-  html += '<h1>Employee Attendance Summary</h1>';
-  html += '<p><strong>' + monthName + ' ' + year + '</strong></p>';
+  html += '<h1>FARAJ FUND</h1>';
+  html += '<h2 style="border-bottom:none;margin-top:0;">Employee Attendance Profiles - ' + monthName + ' ' + year + '</h2>';
   html += '<p style="font-size:10pt;color:#4b5563;">Prepared by: Faith Jacob &mdash; HR Officer &mdash; ' + dateStr + ' &mdash; <em>Confidential</em></p>';
   html += '<hr style="border:none;border-top:2px solid #1e3a5f;margin:10pt 0;"/>';
 
-  html += '<div class="note"><strong>Note:</strong> Personal time calculations are presented both including and excluding late logins. ';
-  html += 'Late time before 12 May 2026 follows the uploaded Excel calculation; from 12 May 2026 onward, late time follows the updated 7:30 AM policy. Final deductions are subject to management decision.</div>';
+  html += '<div class="note"><strong>Note:</strong> Late log-ins are counted only for employees who logged in after 08:00 until May 11th. ';
+  html += 'From 12 May 2026 onward, such late log-ins are calculated from 07:30 but are not deducted from personal time unless management instructs otherwise.</div>';
   html += '<p class="small">Working days for ' + monthName + ' ' + year + ' are calculated automatically as Monday to Friday calendar days, including Fridays: ' + monthlyWorkingDays + ' working days before employee leave deductions.</p>';
 
-  html += '<h2>Organisation KPIs</h2>';
+  for (const emp of employees) {
+    const s = emp.summary;
+    const workingDays = actualWorkingDays(emp, monthlyWorkingDays);
+    const lateRate = workingDays && s.lateInstances > 0 ? pct((s.lateInstances / workingDays) * 100) : 'N/A';
+    html += '<div class="profile">';
+    html += '<h2>' + escapeHtml(employeeDisplay(emp)) + ' (ID: ' + escapeHtml(employeeId(emp)) + ')</h2>';
+    html += '<table>';
+    html += profileRow('Late Instances', s.lateInstances ? String(s.lateInstances) + ' recorded' : '0');
+    html += profileRow('Late Dates', formatLateProfile(emp));
+    html += profileRow('Total Late Time', s.lateInstances ? fmtMins(s.totalLateMinutes) : 'N/A');
+    html += profileRow('Employee Late %', lateRate === 'N/A' ? 'N/A' : lateRate + ' (' + s.lateInstances + ' ÷ ' + workingDays + ' actual working days)');
+    html += profileRow('Documentation / Instructions', formatDocumentation(emp));
+    html += profileRow('Personal Time / Early Departures', escapeHtml(formatPersonalTimeProfile(emp)));
+    html += profileRow('Early Departures', formatEarlyProfile(s));
+    html += profileRow('Work Exceptions / Remarks', formatProfileWorkExceptions(emp));
+    html += profileRow('Leave Days', formatLeaveProfile(s));
+    html += profileRow('Status', profileStatusCell(emp));
+    html += '</table>';
+    html += '</div>';
+  }
+
+  html += '<h2>Employee Summaries</h2>';
+  html += '<table class="tight">';
+  html += tr(['Employee', 'Summary', 'Notes', 'Status'], true);
+  for (const emp of employees) {
+    const summary = emp.report?.summary || computedEmployeeSummary(emp);
+    const notes = (emp.report?.bullets?.length ? emp.report.bullets : employeeNotes(emp)).slice(0, 5).join('<br/>');
+    html += tr([
+      escapeHtml(employeeDisplay(emp)),
+      escapeHtml(summary),
+      notes ? notes.split('<br/>').map(escapeHtml).join('<br/>') : '-',
+      profileStatusCell(emp),
+    ]);
+  }
+  html += '</table>';
+
+  html += '<h2>KPI Summary</h2>';
   html += '<h3>Key Metrics</h3><table>';
   html += tr(['Metric', 'Value', 'Context'], true);
-  html += tr(['Fully Compliant Employees', String(compliantEmployees.length), pct((compliantEmployees.length / Math.max(totalEmployees, 1)) * 100) + ' of reported employees']);
-  html += tr(['Late Arrival Rate', pct((lateEmployees.length / Math.max(totalEmployees, 1)) * 100), lateEmployees.length + ' of ' + totalEmployees + ' employees']);
-  html += tr(['Overall Employee Late %', totalEmployeeLateRate, lateEmployees.length + ' employees with late log-ins ÷ ' + inPersonEmployees.length + ' in-person employees']);
+  html += tr(['Total Employees / Headcount', String(totalEmployees), 'Employees loaded from the workbook']);
+  html += tr(['Employees Included in Attendance Profile Tables', String(totalEmployees), 'Each employee sheet is shown as an individual profile']);
+  html += tr(['Total In-Person Employees', String(inPersonEmployees.length), 'Excludes authorised full remote work where detected']);
+  html += tr(['Employees with Counted Late Log-ins', String(lateEmployees.length), lateEmployees.map(e => escapeHtml(employeeDisplay(e))).join(', ') || 'None']);
+  html += tr(['Overall Employee Late %', lateEmployees.length + ' ÷ ' + inPersonEmployees.length + ' = ' + totalEmployeeLateRate, 'Employees with late log-ins ÷ total in-person employees']);
   html += tr(['Employees with Official Missions', String(employees.filter(e => e.summary.missionCount > 0).length), totalMissions + ' total missions conducted']);
   html += tr(['Employees Who Used Personal Time', String(totalEarlyUsers), 'Permitted early departures within 4-hour monthly allowance unless noted']);
   html += tr(['Exceeded Personal Time', String(exceededEmployees.length), 'Excluding late log-ins unless management applies deduction']);
-  html += tr(['Total Leave Days Taken', String(totalLeaveDays), 'All leave categories from uploaded sheet']);
+  html += tr(['Annual & Sick Leave Days', String(totalLeaveDays) + ' days', 'All leave categories from uploaded sheet']);
   html += tr(['Employees on Remote Work', String(remoteEmployees.length), 'Authorised remote-work entries recorded']);
   html += '</table>';
 
@@ -1178,31 +1355,13 @@ function buildWordDoc(
   html += '</table>';
   html += '<p class="small">Late % = Late Days ÷ Actual Working Days. Actual Working Days = monthly Monday-Friday working days, including Fridays, minus that employee&apos;s leave days.</p>';
 
-  html += '<h2>Employee Summaries</h2>';
-  for (const emp of employees) {
-    const s = emp.summary;
-    const workingDays = actualWorkingDays(emp, monthlyWorkingDays);
-    const lateRate = workingDays ? pct((s.lateInstances / workingDays) * 100) : '0%';
-    const summary = emp.report?.summary || computedEmployeeSummary(emp);
-    const notes = (emp.report?.bullets?.length ? emp.report.bullets : employeeNotes(emp)).slice(0, 3).join('<br/>');
-    html += '<h3>' + escapeHtml(employeeDisplay(emp)) + ' (ID: ' + escapeHtml(employeeId(emp)) + ')</h3>';
-    html += '<table>';
-    html += tr(['Item', 'Details'], true);
-    html += tr(['Late log-ins', s.lateInstances ? s.lateInstances + ' (' + fmtMins(s.totalLateMinutes) + ')' : 'None']);
-    html += tr(['Late %', lateRate + ' (' + s.lateInstances + ' late days ÷ ' + workingDays + ' actual working days)']);
-    html += tr(['Early leave used', s.earlyLeaveCount ? fmtMins(s.totalEarlyLeaveMinutes) + ' across ' + plural(s.earlyLeaveCount, 'entry', 'entries') : 'None']);
-    html += tr(['PT balance', signedBalance(s.allowanceRemaining)]);
-    html += tr(['Leave days', escapeHtml(leaveTextForTable(s))]);
-    html += tr(['Official missions', s.missionCount ? String(s.missionCount) : '-']);
-    html += tr(['Remote work', s.remoteWorkCount ? String(s.remoteWorkCount) : '-']);
-    html += tr(['Summary', escapeHtml(summary)]);
-    html += tr(['Notes', notes ? notes.split('<br/>').map(escapeHtml).join('<br/>') : '-']);
-    html += tr(['Status', statusCell(emp)]);
-    html += '</table>';
-  }
+  html += '<h2>Final HR Note</h2>';
+  html += '<p>This ' + monthName + ' ' + year + ' attendance summary has been prepared based on the fingerprint attendance records provided. Late log-ins have been reviewed in line with the written HR attendance policy communicated to Faraj Fund employees on 11.05.2026. Prior to this, late log-ins were reviewed under the previous attendance practice, whereby late time was applied only where the employee logged in after 08:00.</p>';
+  html += '<p>From 12.05.2026 onward, where applicable, late log-in duration is calculated from 07:30 for employees logging in after the applicable reporting threshold. These late log-ins are recorded separately and are not deducted from the employee&apos;s monthly personal time balance.</p>';
+  html += '<p>From 12.05.2026 onward, only permitted early departures are calculated against the employee&apos;s monthly personal time balance. Fridays, official missions and authorised remote work have not been treated as attendance violations. Where supporting documentation, approval status or follow-up action is not clearly confirmed in the provided records, the status has been recorded as &quot;Management review pending&quot;.</p>';
+  html += '<p>For the purpose of this report, &quot;missing log-in/log-out record&quot; refers to instances where the corresponding fingerprint attendance record does not appear in the system. &quot;PT&quot; refers to personal time.</p>';
 
   html += '<div class="footer">';
-  html += '<p><strong>Note:</strong> Unregistered log out or unregistered log in means no records of log in or log out appear in the attendance system. Late log-ins and early departures are reported separately. Fridays are not treated as violations. Final deductions remain subject to management decision.</p>';
   html += '<table class="sig-table" style="margin-top:20pt;"><tr>';
   html += '<td><strong>Prepared by:</strong><br/>Faith Jacob<br/>HR Officer<br/>' + dateStr + '</td>';
   html += '<td></td>';
