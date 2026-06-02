@@ -73,6 +73,7 @@
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.19",
     "netlify-cli": "^26.0.2",
+    "picomatch": "^4.0.4",
     "postcss": "^8.4.38",
     "tailwindcss": "3.4.3",
     "tailwindcss-animate": "^1.0.7",
